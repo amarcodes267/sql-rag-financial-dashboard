@@ -1,101 +1,231 @@
-import chromadb
+import json
+import math
+import sqlite3
 from pathlib import Path
 
 from rag.embeddings import create_embeddings
 
 
-CHROMA_PATH = Path("data/chroma")
+DATABASE_PATH = Path("data/rag.db")
 
 
-def get_client():
-    CHROMA_PATH.mkdir(
+def get_connection():
+    DATABASE_PATH.parent.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    return chromadb.PersistentClient(
-        path=str(CHROMA_PATH)
+    connection = sqlite3.connect(
+        DATABASE_PATH
     )
 
+    connection.row_factory = sqlite3.Row
 
-def get_collection():
-    client = get_client()
+    return connection
 
-    return client.get_or_create_collection(
-        name="financial_documents"
-    )
+
+def initialize_vector_database():
+
+    connection = get_connection()
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            page INTEGER,
+            text TEXT NOT NULL,
+            embedding TEXT NOT NULL
+        )
+    """)
+
+    connection.commit()
+    connection.close()
 
 
 def clear_collection():
-    client = get_client()
 
-    try:
-        client.delete_collection(
-            name="financial_documents"
-        )
-    except Exception:
-        pass
+    initialize_vector_database()
+
+    connection = get_connection()
+
+    connection.execute(
+        "DELETE FROM documents"
+    )
+
+    connection.commit()
+    connection.close()
 
 
 def add_documents(pages):
-    collection = get_collection()
+
+    initialize_vector_database()
 
     documents = []
-    ids = []
-    metadatas = []
 
-    for index, page in enumerate(pages):
-        text = page["text"].strip()
+    for page in pages:
+
+        text = page.get(
+            "text",
+            ""
+        ).strip()
 
         if not text:
             continue
 
-        documents.append(text)
+        text = text[:6000]
 
-        ids.append(
-            f"page_{page['page']}_{index}"
-        )
-
-        metadatas.append({
-            "page": page["page"]
+        documents.append({
+            "page": page.get(
+                "page",
+                page.get(
+                    "page_number",
+                    0
+                )
+            ),
+            "text": text
         })
 
     if not documents:
-        return
+        raise ValueError(
+            "No readable text was extracted from the PDF."
+        )
 
-    embeddings = create_embeddings(documents)
+    texts = [
+        document["text"]
+        for document in documents
+    ]
 
-    collection.add(
-        documents=documents,
-        embeddings=embeddings,
-        ids=ids,
-        metadatas=metadatas
+    embeddings = create_embeddings(
+        texts
+    )
+
+    if not embeddings:
+        raise ValueError(
+            "No embeddings were generated."
+        )
+
+    if len(documents) != len(embeddings):
+        raise ValueError(
+            "Number of documents and embeddings "
+            "does not match."
+        )
+
+    connection = get_connection()
+
+    try:
+
+        for document, embedding in zip(
+            documents,
+            embeddings
+        ):
+
+            connection.execute(
+                """
+                INSERT INTO documents
+                (page, text, embedding)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    document["page"],
+                    document["text"],
+                    json.dumps(
+                        embedding
+                    )
+                )
+            )
+
+        connection.commit()
+
+    finally:
+
+        connection.close()
+
+
+def cosine_similarity(
+    vector_a,
+    vector_b
+):
+
+    dot_product = sum(
+        a * b
+        for a, b in zip(
+            vector_a,
+            vector_b
+        )
+    )
+
+    magnitude_a = math.sqrt(
+        sum(
+            a * a
+            for a in vector_a
+        )
+    )
+
+    magnitude_b = math.sqrt(
+        sum(
+            b * b
+            for b in vector_b
+        )
+    )
+
+    if magnitude_a == 0 or magnitude_b == 0:
+        return 0
+
+    return (
+        dot_product /
+        (magnitude_a * magnitude_b)
     )
 
 
-def search_documents(query, top_k=5):
-    collection = get_collection()
+def search_documents(
+    query,
+    top_k=3
+):
 
-    query_embedding = create_embeddings([query])[0]
+    initialize_vector_database()
 
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k
-    )
+    connection = get_connection()
 
-    documents = results.get("documents", [[]])[0]
+    rows = connection.execute(
+        """
+        SELECT page, text, embedding
+        FROM documents
+        """
+    ).fetchall()
 
-    metadatas = results.get("metadatas", [[]])[0]
+    connection.close()
 
-    output = []
+    if not rows:
+        return []
 
-    for document, metadata in zip(
-        documents,
-        metadatas
-    ):
-        output.append({
-            "text": document,
-            "page": metadata.get("page")
+    query_embedding = create_embeddings(
+        [query]
+    )[0]
+
+    results = []
+
+    for row in rows:
+
+        stored_embedding = json.loads(
+            row["embedding"]
+        )
+
+        score = cosine_similarity(
+            query_embedding,
+            stored_embedding
+        )
+
+        results.append({
+            "page": row["page"],
+            "text": row["text"],
+            "score": score
         })
 
-    return output
+    results.sort(
+        key=lambda item: item["score"],
+        reverse=True
+    )
+
+    return results[:top_k]
+
+
+initialize_vector_database()
