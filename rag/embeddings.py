@@ -13,13 +13,17 @@ client = genai.Client(
 )
 
 
-def create_embeddings(texts):
+def create_embeddings(
+    texts,
+    task_type="RETRIEVAL_DOCUMENT"
+):
 
     if not texts:
         return []
 
     all_embeddings = []
 
+    # Keep batches safely below the API limit.
     batch_size = 50
 
     for start in range(
@@ -42,17 +46,19 @@ def create_embeddings(texts):
                     model=MODEL_NAME,
                     contents=batch,
                     config=types.EmbedContentConfig(
-                        output_dimensionality=256
+                        task_type=task_type,
+                        output_dimensionality=256,
+                        auto_truncate=True
                     )
                 )
 
-                batch_embeddings = [
+                embeddings = [
                     embedding.values
                     for embedding in response.embeddings
                 ]
 
                 all_embeddings.extend(
-                    batch_embeddings
+                    embeddings
                 )
 
                 break
@@ -63,7 +69,11 @@ def create_embeddings(texts):
 
                 error_text = str(error)
 
-                if "503" in error_text or "UNAVAILABLE" in error_text:
+                if (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                    or "429" in error_text
+                ):
 
                     wait_time = 2 ** attempt
 
@@ -73,14 +83,35 @@ def create_embeddings(texts):
 
                 else:
 
-                    raise error
+                    raise
 
         else:
 
             raise RuntimeError(
-                "Gemini embedding service is temporarily "
-                "unavailable after multiple retries. "
-                "Please try processing the PDF again later."
+                "Gemini embedding service is "
+                "temporarily unavailable. "
+                "Please try again."
             ) from last_error
 
     return all_embeddings
+
+
+def create_document_embeddings(texts):
+
+    return create_embeddings(
+        texts,
+        task_type="RETRIEVAL_DOCUMENT"
+    )
+
+
+def create_query_embedding(text):
+
+    embeddings = create_embeddings(
+        [text],
+        task_type="RETRIEVAL_QUERY"
+    )
+
+    if not embeddings:
+        return []
+
+    return embeddings[0]

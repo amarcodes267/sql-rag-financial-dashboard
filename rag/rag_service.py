@@ -15,7 +15,7 @@ def answer_with_rag(question):
 
     results = search_documents(
         question,
-        top_k=3
+        top_k=5
     )
 
     if not results:
@@ -29,13 +29,32 @@ def answer_with_rag(question):
 
     for result in results:
 
-        text = result["text"]
+        page = result.get(
+            "page",
+            "Unknown"
+        )
 
-        # Limit each retrieved chunk
-        text = text[:4000]
+        text = result.get(
+            "text",
+            ""
+        ).strip()
+
+        if not text:
+            continue
 
         context_parts.append(
-            f"Page {result['page']}:\n{text}"
+            f"""
+PAGE {page}
+
+{text[:5000]}
+"""
+        )
+
+    if not context_parts:
+
+        return (
+            "No readable information was found "
+            "in the retrieved report sections."
         )
 
     context = "\n\n".join(
@@ -43,24 +62,54 @@ def answer_with_rag(question):
     )
 
     prompt = f"""
-Answer the financial question using ONLY
-the provided report context.
+You are a financial report analysis assistant.
 
-Do not invent information.
+Answer the user's question using ONLY the
+provided financial report context.
 
-If the answer is not available,
-say so clearly.
+IMPORTANT RULES:
 
-Question:
+1. Do not use outside knowledge.
+2. Do not invent facts.
+3. If the context contains the answer, explain it clearly.
+4. If the answer is not present in the context,
+   say that the information was not found.
+5. For financial risks, strategies, business information,
+   management discussion, and other narrative questions,
+   summarize the relevant information from the report.
+6. Mention the relevant page number when possible.
+7. Keep the answer concise but useful.
+
+USER QUESTION:
+
 {question}
 
-Report context:
+FINANCIAL REPORT CONTEXT:
+
 {context}
 """
 
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
+    try:
 
-    return response.text
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt
+        )
+
+        answer = response.text.strip()
+
+        if not answer:
+
+            return (
+                "The AI could not generate an answer "
+                "from the retrieved report information."
+            )
+
+        return answer
+
+    except Exception as error:
+
+        return (
+            f"Unable to analyze the financial report: "
+            f"{error}"
+        )
