@@ -5,3 +5,7 @@ base = "dark"
 headless = true
 enableCORS = false
 enableXsrfProtection = false
+enableWebsocketCompression = false
+
+[browser]
+gatherUsageStats = false
