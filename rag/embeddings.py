@@ -1,3 +1,5 @@
+import time
+
 from google import genai
 from google.genai import types
 
@@ -18,8 +20,6 @@ def create_embeddings(texts):
 
     all_embeddings = []
 
-    # Google allows a maximum of 100 requests
-    # per embedding batch.
     batch_size = 50
 
     for start in range(
@@ -32,21 +32,55 @@ def create_embeddings(texts):
             start:start + batch_size
         ]
 
-        response = client.models.embed_content(
-            model=MODEL_NAME,
-            contents=batch,
-            config=types.EmbedContentConfig(
-                output_dimensionality=256
-            )
-        )
+        last_error = None
 
-        batch_embeddings = [
-            embedding.values
-            for embedding in response.embeddings
-        ]
+        for attempt in range(4):
 
-        all_embeddings.extend(
-            batch_embeddings
-        )
+            try:
+
+                response = client.models.embed_content(
+                    model=MODEL_NAME,
+                    contents=batch,
+                    config=types.EmbedContentConfig(
+                        output_dimensionality=256
+                    )
+                )
+
+                batch_embeddings = [
+                    embedding.values
+                    for embedding in response.embeddings
+                ]
+
+                all_embeddings.extend(
+                    batch_embeddings
+                )
+
+                break
+
+            except Exception as error:
+
+                last_error = error
+
+                error_text = str(error)
+
+                if "503" in error_text or "UNAVAILABLE" in error_text:
+
+                    wait_time = 2 ** attempt
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                else:
+
+                    raise error
+
+        else:
+
+            raise RuntimeError(
+                "Gemini embedding service is temporarily "
+                "unavailable after multiple retries. "
+                "Please try processing the PDF again later."
+            ) from last_error
 
     return all_embeddings
