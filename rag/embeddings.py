@@ -1,24 +1,24 @@
-from sentence_transformers import SentenceTransformer
+from google import genai
+
+from utils.config import GEMINI_API_KEY
 
 
-_model = None
+client = genai.Client(
+    api_key=GEMINI_API_KEY
+)
 
 
-def get_embedding_model():
-    global _model
-
-    if _model is None:
-        _model = SentenceTransformer(
-            "all-MiniLM-L6-v2"
-        )
-
-    return _model
+MODEL_NAME = "gemini-embedding-001"
 
 
 def create_embeddings(texts):
-    model = get_embedding_model()
 
-    return model.encode(
-        texts,
-        convert_to_numpy=True
-    ).tolist()
+    response = client.models.embed_content(
+        model=MODEL_NAME,
+        contents=texts
+    )
+
+    return [
+        embedding.values
+        for embedding in response.embeddings
+    ]

@@ -5,6 +5,5 @@ plotly
 PyMuPDF
 python-dotenv
 google-genai
-sentence-transformers
 chromadb
 sqlalchemy
