@@ -14,12 +14,13 @@ client = genai.Client(
 
 def classify_question_locally(question):
 
-    q = question.lower()
+    q = question.lower().strip()
 
     sql_keywords = [
         "revenue",
         "sales",
         "profit",
+        "net income",
         "income",
         "expense",
         "expenses",
@@ -37,6 +38,7 @@ def classify_question_locally(question):
         "average",
         "how much",
         "how many",
+        "financial",
         "2023",
         "2024",
         "2025",
@@ -73,11 +75,9 @@ def classify_question_locally(question):
     )
 
     if has_sql and has_rag:
-
         return "HYBRID"
 
     if has_sql:
-
         return "SQL"
 
     return "RAG"
@@ -96,23 +96,23 @@ def answer_hybrid(question):
     prompt = f"""
 You are a financial analyst.
 
-Combine the SQL result and the report analysis
-into one concise answer.
+Answer the question using the SQL result
+and financial report analysis.
 
 Question:
 {question}
 
-SQL result:
+SQL Result:
 {sql_result["data"]}
 
-RAG analysis:
+Report Analysis:
 {rag_result}
 
 Rules:
 - Do not invent information.
 - Use SQL for numerical facts.
-- Use RAG for explanations.
-- Keep the answer concise.
+- Use report analysis for explanations.
+- Give a concise answer.
 """
 
     response = client.models.generate_content(
